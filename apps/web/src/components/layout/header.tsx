@@ -4,15 +4,15 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useState } from 'react';
 import { useTheme } from 'next-themes';
-import { Menu, X, Sun, Moon, User, ShoppingBag, Search } from 'lucide-react';
+import { Menu, X, Sun, Moon, User, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const navigation = [
   { name: 'Takas', href: '/takas' },
-  { name: 'Ürünler', href: '/catalog' },
-  { name: 'Nasıl Çalışır', href: '/how-it-works' },
-  { name: 'Hakkımızda', href: '/about' },
+  { name: 'Keşfet', href: '/kesfet' },
+  { name: 'Nasıl Çalışır', href: '/nasil-calisir' },
+  { name: 'Hakkımızda', href: '/hakkimizda' },
 ];
 
 export function Header() {
@@ -67,17 +67,9 @@ export function Header() {
             <span className="sr-only">Ara</span>
           </Button>
 
-          {/* Cart */}
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/cart">
-              <ShoppingBag className="h-5 w-5" />
-              <span className="sr-only">Sepet</span>
-            </Link>
-          </Button>
-
           {/* User menu */}
           <Button variant="ghost" size="icon" asChild className="hidden md:flex">
-            <Link href="/login">
+            <Link href="/giris">
               <User className="h-5 w-5" />
               <span className="sr-only">Hesabım</span>
             </Link>
@@ -129,7 +121,7 @@ export function Header() {
               <Link href="/takas">Takas Başlat</Link>
             </Button>
             <Button asChild variant="outline" className="flex-1">
-              <Link href="/login">Giriş Yap</Link>
+              <Link href="/giris">Giriş Yap</Link>
             </Button>
           </div>
         </div>
