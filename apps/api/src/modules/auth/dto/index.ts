@@ -78,20 +78,7 @@ export class ResetPasswordDto {
   password!: string;
 }
 
-export class AuthResponseDto {
-  @ApiProperty()
-  accessToken!: string;
-
-  @ApiProperty()
-  refreshToken!: string;
-
-  @ApiProperty()
-  expiresIn!: number;
-
-  @ApiProperty()
-  user!: UserResponseDto;
-}
-
+// UserResponseDto must be defined before AuthResponseDto
 export class UserResponseDto {
   @ApiProperty()
   id!: string;
@@ -116,4 +103,18 @@ export class UserResponseDto {
 
   @ApiProperty()
   createdAt!: Date;
+}
+
+export class AuthResponseDto {
+  @ApiProperty()
+  accessToken!: string;
+
+  @ApiProperty()
+  refreshToken!: string;
+
+  @ApiProperty()
+  expiresIn!: number;
+
+  @ApiProperty({ type: UserResponseDto })
+  user!: UserResponseDto;
 }
