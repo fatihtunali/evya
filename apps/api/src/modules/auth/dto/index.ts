@@ -12,24 +12,24 @@ import {
 export class RegisterDto {
   @ApiProperty({ example: 'john@example.com' })
   @IsEmail({}, { message: 'Geçerli bir email adresi giriniz' })
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'password123', minLength: 8 })
   @IsString()
   @MinLength(8, { message: 'Şifre en az 8 karakter olmalıdır' })
-  password: string;
+  password!: string;
 
   @ApiProperty({ example: 'John' })
   @IsString()
   @MinLength(2)
   @MaxLength(50)
-  firstName: string;
+  firstName!: string;
 
   @ApiProperty({ example: 'Doe' })
   @IsString()
   @MinLength(2)
   @MaxLength(50)
-  lastName: string;
+  lastName!: string;
 
   @ApiProperty({ example: '5551234567', required: false })
   @IsOptional()
@@ -48,72 +48,72 @@ export class RegisterDto {
 export class LoginDto {
   @ApiProperty({ example: 'john@example.com' })
   @IsEmail({}, { message: 'Geçerli bir email adresi giriniz' })
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'password123' })
   @IsString()
-  password: string;
+  password!: string;
 }
 
 export class RefreshTokenDto {
   @ApiProperty()
   @IsString()
-  refreshToken: string;
+  refreshToken!: string;
 }
 
 export class ForgotPasswordDto {
   @ApiProperty({ example: 'john@example.com' })
   @IsEmail({}, { message: 'Geçerli bir email adresi giriniz' })
-  email: string;
+  email!: string;
 }
 
 export class ResetPasswordDto {
   @ApiProperty()
   @IsString()
-  token: string;
+  token!: string;
 
   @ApiProperty({ minLength: 8 })
   @IsString()
   @MinLength(8, { message: 'Şifre en az 8 karakter olmalıdır' })
-  password: string;
+  password!: string;
 }
 
 export class AuthResponseDto {
   @ApiProperty()
-  accessToken: string;
+  accessToken!: string;
 
   @ApiProperty()
-  refreshToken: string;
+  refreshToken!: string;
 
   @ApiProperty()
-  expiresIn: number;
+  expiresIn!: number;
 
   @ApiProperty()
-  user: UserResponseDto;
+  user!: UserResponseDto;
 }
 
 export class UserResponseDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  email: string;
+  email!: string;
 
   @ApiProperty()
-  firstName: string;
+  firstName!: string;
 
   @ApiProperty()
-  lastName: string;
+  lastName!: string;
 
   @ApiProperty({ required: false })
   phone?: string;
 
   @ApiProperty()
-  emailVerified: boolean;
+  emailVerified!: boolean;
 
   @ApiProperty()
-  phoneVerified: boolean;
+  phoneVerified!: boolean;
 
   @ApiProperty()
-  createdAt: Date;
+  createdAt!: Date;
 }
