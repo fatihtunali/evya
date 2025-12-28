@@ -4,28 +4,27 @@ import { Facebook, Twitter, Instagram, Youtube, Mail, Phone, MapPin } from 'luci
 
 const footerLinks = {
   company: [
-    { name: 'Hakkımızda', href: '/about' },
-    { name: 'Kariyer', href: '/careers' },
+    { name: 'Hakkımızda', href: '/hakkimizda' },
+    { name: 'Kariyer', href: '/kariyer' },
     { name: 'Blog', href: '/blog' },
-    { name: 'Basın', href: '/press' },
+    { name: 'Basın', href: '/basin' },
   ],
   support: [
-    { name: 'Yardım Merkezi', href: '/help' },
-    { name: 'İletişim', href: '/contact' },
-    { name: 'SSS', href: '/faq' },
-    { name: 'Kargo Takibi', href: '/tracking' },
+    { name: 'Yardım Merkezi', href: '/yardim' },
+    { name: 'İletişim', href: '/iletisim' },
+    { name: 'SSS', href: '/sss' },
   ],
   legal: [
-    { name: 'Kullanım Koşulları', href: '/terms' },
-    { name: 'Gizlilik Politikası', href: '/privacy' },
+    { name: 'Kullanım Koşulları', href: '/kullanim-kosullari' },
+    { name: 'Gizlilik Politikası', href: '/gizlilik' },
     { name: 'KVKK', href: '/kvkk' },
-    { name: 'Çerez Politikası', href: '/cookies' },
+    { name: 'Çerez Politikası', href: '/cerez-politikasi' },
   ],
   services: [
     { name: 'Takas', href: '/takas' },
-    { name: 'Ürün Kataloğu', href: '/catalog' },
-    { name: 'Kurumsal', href: '/corporate' },
-    { name: 'Bayilik', href: '/franchise' },
+    { name: 'Keşfet', href: '/kesfet' },
+    { name: 'Kurumsal', href: '/kurumsal' },
+    { name: 'Bayilik', href: '/bayilik' },
   ],
 };
 
