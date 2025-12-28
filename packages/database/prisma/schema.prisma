@@ -439,6 +439,7 @@ model Valuation {
 
 model TradeIn {
   id                  String         @id @default(uuid())
+  userId              String
   valuationId         String         @unique
   tradeInItemId       String         @unique
   status              TradeInStatus  @default(CREATED)
@@ -455,12 +456,14 @@ model TradeIn {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
+  user               User                @relation(fields: [userId], references: [id])
   valuation          Valuation           @relation(fields: [valuationId], references: [id])
   tradeInItem        TradeInItem         @relation(fields: [tradeInItemId], references: [id])
   appliedToOrder     Order?              @relation("AppliedTradeIn", fields: [appliedToOrderId], references: [id])
   timeline           TradeInTimeline[]
   creditTransactions CreditTransaction[]
 
+  @@index([userId])
   @@index([status])
   @@index([trackingNumber])
   @@map("trade_ins")
