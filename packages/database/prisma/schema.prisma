@@ -1,0 +1,698 @@
+// ===========================================
+// PRISMA SCHEMA - Eskisini Ver Yenisini Al
+// ===========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// ENUMS
+// ===========================================
+
+enum ValuationStatus {
+  PENDING
+  QUOTED
+  ACCEPTED
+  EXPIRED
+  USED
+  REJECTED
+}
+
+enum TradeInStatus {
+  CREATED
+  LABEL_CREATED
+  IN_TRANSIT
+  RECEIVED
+  INSPECTING
+  FINAL_OFFERED
+  COMPLETED
+  REJECTED
+  RETURNED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURN_REQUESTED
+  RETURNED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ShipmentStatus {
+  PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
+enum SettlementType {
+  CREDIT
+  ORDER_DISCOUNT
+}
+
+enum CatalogProductCondition {
+  NEW
+  REFURBISHED
+  LIKE_NEW
+}
+
+enum TradeInItemCondition {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum ScreenCondition {
+  PERFECT
+  MINOR_SCRATCHES
+  CRACKED
+}
+
+enum BodyCondition {
+  PERFECT
+  MINOR_SCRATCHES
+  DENTS
+  MAJOR_DAMAGE
+}
+
+enum CreditTransactionType {
+  EARNED
+  USED
+  EXPIRED
+  REFUNDED
+}
+
+enum NotificationType {
+  ORDER_UPDATE
+  TRADE_IN_UPDATE
+  PAYMENT
+  CREDIT
+  PROMOTION
+  SYSTEM
+}
+
+enum ShippingMethod {
+  COURIER
+  DROPOFF
+  PICKUP
+}
+
+enum PaymentProvider {
+  IYZICO
+  PAYTR
+}
+
+enum RiskEventType {
+  FRAUD_SUSPECTED
+  IMEI_BLACKLISTED
+  DUPLICATE_DEVICE
+  CONDITION_MISMATCH
+  STOLEN_DEVICE
+  IDENTITY_MISMATCH
+  SUSPICIOUS_PATTERN
+  PAYMENT_FRAUD
+  ACCOUNT_TAKEOVER
+}
+
+enum RiskEventSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TimelineActor {
+  SYSTEM
+  USER
+  ADMIN
+}
+
+// ===========================================
+// USER & AUTH
+// ===========================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatar        String?
+  emailVerified Boolean   @default(false)
+  phoneVerified Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  addresses          Address[]
+  valuations         Valuation[]
+  tradeIns           TradeIn[]
+  orders             Order[]
+  creditTransactions CreditTransaction[]
+  notifications      Notification[]
+  refreshTokens      RefreshToken[]
+  riskEvents         RiskEvent[]
+
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique @db.VarChar(500)
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model Address {
+  id           String   @id @default(uuid())
+  userId       String
+  title        String
+  firstName    String
+  lastName     String
+  phone        String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  district     String
+  postalCode   String?
+  country      String   @default("TR")
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingOrders  Order[] @relation("ShippingAddress")
+  billingOrders   Order[] @relation("BillingAddress")
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ===========================================
+// CREDITS
+// ===========================================
+
+model CreditTransaction {
+  id             String                @id @default(uuid())
+  userId         String
+  type           CreditTransactionType
+  amount         Decimal               @db.Decimal(10, 2)
+  description    String?
+  relatedTradeInId String?
+  relatedOrderId String?
+  expiresAt      DateTime?
+  createdAt      DateTime              @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeIn  TradeIn? @relation(fields: [relatedTradeInId], references: [id])
+  order    Order?   @relation(fields: [relatedOrderId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("credit_transactions")
+}
+
+// ===========================================
+// CATALOG & CATEGORIES
+// ===========================================
+
+model Category {
+  id               String   @id @default(uuid())
+  name             String
+  slug             String   @unique
+  description      String?  @db.Text
+  image            String?
+  parentId         String?
+  tradeInSupported Boolean  @default(false)
+  sortOrder        Int      @default(0)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products CatalogProduct[]
+  brands   BrandCategory[]
+
+  @@index([parentId])
+  @@index([slug])
+  @@map("categories")
+}
+
+model Brand {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  logo      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories   BrandCategory[]
+  products     CatalogProduct[]
+  deviceModels DeviceModel[]
+
+  @@index([slug])
+  @@map("brands")
+}
+
+model BrandCategory {
+  brandId    String
+  categoryId String
+
+  brand    Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([brandId, categoryId])
+  @@map("brand_categories")
+}
+
+model DeviceModel {
+  id          String   @id @default(uuid())
+  brandId     String
+  name        String
+  releaseYear Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  brand    Brand           @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  variants DeviceVariant[]
+  tradeInItems TradeInItem[]
+
+  @@index([brandId])
+  @@map("device_models")
+}
+
+model DeviceVariant {
+  id               String  @id @default(uuid())
+  modelId          String
+  storage          String?
+  color            String?
+  baseTradeInValue Decimal @db.Decimal(10, 2)
+  isActive         Boolean @default(true)
+
+  model        DeviceModel   @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  tradeInItems TradeInItem[]
+
+  @@index([modelId])
+  @@map("device_variants")
+}
+
+model CatalogProduct {
+  id                 String                  @id @default(uuid())
+  sku                String                  @unique
+  name               String
+  slug               String                  @unique
+  description        String?                 @db.Text
+  brandId            String
+  categoryId         String
+  price              Decimal                 @db.Decimal(10, 2)
+  originalPrice      Decimal?                @db.Decimal(10, 2)
+  discountPercentage Decimal?                @db.Decimal(5, 2)
+  condition          CatalogProductCondition
+  stock              Int                     @default(0)
+  specifications     Json?
+  warrantyMonths     Int?
+  warrantyDescription String?
+  tradeInEligible    Boolean                 @default(true)
+  isActive           Boolean                 @default(true)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  brand      Brand              @relation(fields: [brandId], references: [id])
+  category   Category           @relation(fields: [categoryId], references: [id])
+  images     ProductImage[]
+  orderItems OrderItem[]
+
+  @@index([brandId])
+  @@index([categoryId])
+  @@index([slug])
+  @@index([sku])
+  @@index([condition])
+  @@index([price])
+  @@map("catalog_products")
+}
+
+model ProductImage {
+  id        String @id @default(uuid())
+  productId String
+  url       String
+  sortOrder Int    @default(0)
+  isPrimary Boolean @default(false)
+
+  product CatalogProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// ===========================================
+// TRADE-IN
+// ===========================================
+
+model TradeInItem {
+  id                String               @id @default(uuid())
+  userId            String
+  modelId           String
+  variantId         String?
+  declaredCondition TradeInItemCondition
+  actualCondition   TradeInItemCondition?
+  screenCondition   ScreenCondition?
+  bodyCondition     BodyCondition?
+  batteryHealth     Int?
+  functionalIssues  Json?
+  accessories       Json?
+  imei              String?
+  serialNumber      String?
+  images            Json?
+  inspectionImages  Json?
+  inspectionNotes   String?              @db.Text
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  model     DeviceModel    @relation(fields: [modelId], references: [id])
+  variant   DeviceVariant? @relation(fields: [variantId], references: [id])
+  valuation Valuation?
+  tradeIn   TradeIn?
+
+  @@index([userId])
+  @@index([modelId])
+  @@index([imei])
+  @@map("trade_in_items")
+}
+
+model Valuation {
+  id             String          @id @default(uuid())
+  userId         String
+  tradeInItemId  String          @unique
+  status         ValuationStatus @default(PENDING)
+  estimatedValue Decimal         @db.Decimal(10, 2)
+  minimumValue   Decimal?        @db.Decimal(10, 2)
+  maximumValue   Decimal?        @db.Decimal(10, 2)
+  validUntil     DateTime
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeInItem TradeInItem @relation(fields: [tradeInItemId], references: [id], onDelete: Cascade)
+  tradeIn     TradeIn?
+
+  @@index([userId])
+  @@index([status])
+  @@index([validUntil])
+  @@map("valuations")
+}
+
+model TradeIn {
+  id                  String         @id @default(uuid())
+  valuationId         String         @unique
+  tradeInItemId       String         @unique
+  status              TradeInStatus  @default(CREATED)
+  shippingMethod      ShippingMethod
+  trackingNumber      String?
+  shippingLabel       String?
+  initialOffer        Decimal        @db.Decimal(10, 2)
+  finalOffer          Decimal?       @db.Decimal(10, 2)
+  settlementType      SettlementType
+  settlementStatus    String?
+  appliedToOrderId    String?
+  creditTransactionId String?
+  rejectionReason     String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  valuation          Valuation           @relation(fields: [valuationId], references: [id])
+  tradeInItem        TradeInItem         @relation(fields: [tradeInItemId], references: [id])
+  appliedToOrder     Order?              @relation("AppliedTradeIn", fields: [appliedToOrderId], references: [id])
+  timeline           TradeInTimeline[]
+  creditTransactions CreditTransaction[]
+
+  @@index([status])
+  @@index([trackingNumber])
+  @@map("trade_ins")
+}
+
+model TradeInTimeline {
+  id        String        @id @default(uuid())
+  tradeInId String
+  status    String
+  note      String?
+  actor     TimelineActor
+  createdAt DateTime      @default(now())
+
+  tradeIn TradeIn @relation(fields: [tradeInId], references: [id], onDelete: Cascade)
+
+  @@index([tradeInId])
+  @@map("trade_in_timeline")
+}
+
+// ===========================================
+// ORDERS
+// ===========================================
+
+model Order {
+  id                 String      @id @default(uuid())
+  orderNumber        String      @unique
+  userId             String
+  status             OrderStatus @default(PENDING)
+  shippingAddressId  String
+  billingAddressId   String?
+  subtotal           Decimal     @db.Decimal(10, 2)
+  shippingCost       Decimal     @db.Decimal(10, 2) @default(0)
+  couponDiscount     Decimal     @db.Decimal(10, 2) @default(0)
+  tradeInDiscount    Decimal     @db.Decimal(10, 2) @default(0)
+  creditUsed         Decimal     @db.Decimal(10, 2) @default(0)
+  tax                Decimal     @db.Decimal(10, 2) @default(0)
+  total              Decimal     @db.Decimal(10, 2)
+  shippingProvider   String?
+  shippingTracking   String?
+  estimatedDelivery  DateTime?
+  notes              String?     @db.Text
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user               User              @relation(fields: [userId], references: [id])
+  shippingAddress    Address           @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddress     Address?          @relation("BillingAddress", fields: [billingAddressId], references: [id])
+  items              OrderItem[]
+  payments           Payment[]
+  timeline           OrderTimeline[]
+  appliedTradeIn     TradeIn[]         @relation("AppliedTradeIn")
+  creditTransactions CreditTransaction[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([orderNumber])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id               String                  @id @default(uuid())
+  orderId          String
+  productId        String
+  productName      String
+  productImage     String?
+  productCondition CatalogProductCondition
+  quantity         Int
+  unitPrice        Decimal                 @db.Decimal(10, 2)
+  totalPrice       Decimal                 @db.Decimal(10, 2)
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product CatalogProduct @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model OrderTimeline {
+  id        String        @id @default(uuid())
+  orderId   String
+  status    String
+  note      String?
+  actor     TimelineActor
+  createdAt DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_timeline")
+}
+
+// ===========================================
+// PAYMENTS
+// ===========================================
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String
+  amount            Decimal         @db.Decimal(10, 2)
+  currency          String          @default("TRY")
+  status            PaymentStatus   @default(PENDING)
+  provider          PaymentProvider
+  providerPaymentId String?
+  installments      Int             @default(1)
+  checkoutFormContent String?       @db.Text
+  iframeUrl         String?
+  callbackData      Json?
+  paidAt            DateTime?
+  refundedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([status])
+  @@index([providerPaymentId])
+  @@map("payments")
+}
+
+// ===========================================
+// SHIPPING
+// ===========================================
+
+model ShippingProvider {
+  id                  String   @id @default(uuid())
+  name                String
+  slug                String   @unique
+  logo                String?
+  estimatedDays       String?
+  trackingUrlTemplate String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("shipping_providers")
+}
+
+model DropoffLocation {
+  id           String   @id @default(uuid())
+  name         String
+  address      String
+  city         String
+  district     String
+  lat          Decimal  @db.Decimal(10, 8)
+  lng          Decimal  @db.Decimal(11, 8)
+  phone        String?
+  workingHours String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([city])
+  @@index([lat, lng])
+  @@map("dropoff_locations")
+}
+
+// ===========================================
+// NOTIFICATIONS
+// ===========================================
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String           @db.Text
+  data      Json?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ===========================================
+// ADMIN & RISK
+// ===========================================
+
+model RiskEvent {
+  id          String            @id @default(uuid())
+  type        RiskEventType
+  severity    RiskEventSeverity
+  entityType  String
+  entityId    String
+  userId      String?
+  description String?           @db.Text
+  metadata    Json?
+  actionTaken String?
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  resolution  String?           @db.Text
+  createdAt   DateTime          @default(now())
+  createdBy   String?
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([type])
+  @@index([severity])
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("risk_events")
+}
+
+// ===========================================
+// COUPONS (Bonus)
+// ===========================================
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  description     String?
+  discountType    String    // PERCENTAGE, FIXED
+  discountValue   Decimal   @db.Decimal(10, 2)
+  minOrderAmount  Decimal?  @db.Decimal(10, 2)
+  maxDiscount     Decimal?  @db.Decimal(10, 2)
+  usageLimit      Int?
+  usedCount       Int       @default(0)
+  validFrom       DateTime
+  validUntil      DateTime
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([code])
+  @@index([validFrom, validUntil])
+  @@map("coupons")
+}

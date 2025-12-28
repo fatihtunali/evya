@@ -1,0 +1,2789 @@
+openapi: 3.0.3
+info:
+  title: Eskisini Ver Yenisini Al API
+  description: |
+    Trade-in platformu API'si. Kullanıcıların eski ürünlerini değerlendirip
+    yeni ürünlerle takas etmelerine olanak sağlar.
+
+    ## Domain Modeli
+
+    ### CatalogProduct vs TradeInItem
+    - **CatalogProduct**: Satışa sunulan yeni/yenilenmiş ürünler (stok, fiyat, garanti)
+    - **TradeInItem**: Kullanıcının trade-in için gönderdiği eski cihaz (değerleme, durum, IMEI)
+
+    ### Naming Conventions
+
+    | Domain | Entity | Endpoint | Tag |
+    |--------|--------|----------|-----|
+    | Ürün Kataloğu | `CatalogProduct` | `/catalog/products` | Catalog |
+    | Trade-In | `TradeIn` | `/trade-ins` | TradeIn |
+    | Değerleme | `Valuation` | `/trade-ins/valuations` | TradeIn |
+    | Sipariş | `Order` | `/orders` | Orders |
+    | Kredi | `Credit` | `/credits` | Users |
+
+    ### Terminoloji Standardı
+    - **Credits** (not Wallet): Kullanıcı bakiyesi için "Credits" terminolojisi kullanılır
+    - **TradeIn** (not Submission): Ana domain ismi "TradeIn", detay entity "TradeIn" olarak kalır
+    - **Error**: Tüm hata response'ları `ErrorResponse` şemasını kullanır
+
+    ### State Machine Standardı
+    Tüm status alanları SCREAMING_CASE kullanır ve tutarlı geçişlere sahiptir.
+
+    ### Settlement Policy (MVP)
+    - **CREDIT**: Trade-in değeri kullanıcı hesabına kredi olarak eklenir
+    - **ORDER_DISCOUNT**: Trade-in değeri siparişten düşülür
+    - ⚠️ **BANK_TRANSFER**: MVP'de YOKTUR. Faz 2'de KYC/AML sonrası eklenecektir.
+
+  version: 1.1.0
+  contact:
+    name: API Destek
+    email: api@eskisiniveryenisinial.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.eskisiniveryenisinial.com/v1
+    description: Production server
+  - url: https://staging-api.eskisiniveryenisinial.com/v1
+    description: Staging server
+  - url: http://localhost:3000/v1
+    description: Development server
+
+tags:
+  - name: Auth
+    description: Kimlik doğrulama işlemleri
+  - name: Users
+    description: Kullanıcı yönetimi
+  - name: Credits
+    description: Trade-in kredileri ve bakiye yönetimi
+  - name: Catalog
+    description: Yeni/yenilenmiş ürün kataloğu
+  - name: Categories
+    description: Ürün kategorileri
+  - name: TradeIn
+    description: Eski ürün değerleme ve geri alım
+  - name: Orders
+    description: Sipariş yönetimi
+  - name: Payments
+    description: Ödeme işlemleri
+  - name: Shipping
+    description: Kargo ve teslimat
+  - name: Notifications
+    description: Bildirimler
+  - name: Admin
+    description: |
+      Admin ve sistem endpoint'leri.
+      Bu endpoint'ler PUBLIC API değildir, sadece internal kullanım içindir.
+
+# ============================================
+# STATE MACHINE DEFINITIONS (x-extension)
+# ============================================
+x-stateMachines:
+  valuationStatus:
+    description: Değerleme durumu geçişleri
+    initialState: PENDING
+    transitions:
+      PENDING: [QUOTED]
+      QUOTED: [ACCEPTED, EXPIRED, REJECTED]
+      ACCEPTED: [USED]
+      EXPIRED: []      # Terminal state
+      USED: []         # Terminal state
+      REJECTED: []     # Terminal state
+
+  tradeInStatus:
+    description: Trade-in gönderim durumu geçişleri
+    initialState: CREATED
+    transitions:
+      CREATED: [LABEL_CREATED, REJECTED]
+      LABEL_CREATED: [IN_TRANSIT]
+      IN_TRANSIT: [RECEIVED]
+      RECEIVED: [INSPECTING]
+      INSPECTING: [FINAL_OFFERED, REJECTED]
+      FINAL_OFFERED: [COMPLETED, RETURNED]
+      COMPLETED: []    # Terminal state
+      REJECTED: []     # Terminal state
+      RETURNED: []     # Terminal state
+
+  orderStatus:
+    description: Sipariş durumu geçişleri
+    initialState: PENDING
+    transitions:
+      PENDING: [PAID, CANCELLED]
+      PAID: [PROCESSING, CANCELLED]
+      PROCESSING: [SHIPPED, CANCELLED]
+      SHIPPED: [DELIVERED, RETURN_REQUESTED]
+      DELIVERED: [RETURN_REQUESTED]
+      RETURN_REQUESTED: [RETURNED]
+      CANCELLED: []    # Terminal state
+      RETURNED: []     # Terminal state
+
+  paymentStatus:
+    description: Ödeme durumu geçişleri
+    initialState: PENDING
+    transitions:
+      PENDING: [PROCESSING, FAILED]
+      PROCESSING: [COMPLETED, FAILED]
+      COMPLETED: [REFUNDED, PARTIALLY_REFUNDED]
+      FAILED: [PENDING]  # Retry allowed
+      REFUNDED: []       # Terminal state
+      PARTIALLY_REFUNDED: [REFUNDED]
+
+paths:
+  # ============================================
+  # AUTH - Kimlik Doğrulama
+  # ============================================
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Yeni kullanıcı kaydı
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Kayıt başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email zaten kayıtlı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Kullanıcı girişi
+      operationId: loginUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Giriş başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Token yenileme
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Token yenilendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Çıkış yap
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Çıkış başarılı
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/forgot-password:
+    post:
+      tags:
+        - Auth
+      summary: Şifre sıfırlama isteği
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Şifre sıfırlama emaili gönderildi
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/reset-password:
+    post:
+      tags:
+        - Auth
+      summary: Şifre sıfırlama
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - password
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Şifre başarıyla sıfırlandı
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================
+  # USERS - Kullanıcı Yönetimi
+  # ============================================
+  /users/me:
+    get:
+      tags:
+        - Users
+      summary: Mevcut kullanıcı bilgilerini getir
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Kullanıcı bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      tags:
+        - Users
+      summary: Kullanıcı bilgilerini güncelle
+      operationId: updateCurrentUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Güncelleme başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/addresses:
+    get:
+      tags:
+        - Users
+      summary: Kullanıcı adreslerini listele
+      operationId: getUserAddresses
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Adres listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Address'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Users
+      summary: Yeni adres ekle
+      operationId: addUserAddress
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressRequest'
+      responses:
+        '201':
+          description: Adres eklendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/addresses/{addressId}:
+    parameters:
+      - name: addressId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    put:
+      tags:
+        - Users
+      summary: Adresi güncelle
+      operationId: updateUserAddress
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressRequest'
+      responses:
+        '200':
+          description: Adres güncellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Users
+      summary: Adresi sil
+      operationId: deleteUserAddress
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Adres silindi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /credits:
+    get:
+      tags:
+        - Credits
+      summary: Kullanıcının trade-in kredilerini getir
+      operationId: getCredits
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Kredi bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserCredits'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /credits/transactions:
+    get:
+      tags:
+        - Credits
+      summary: Kredi işlem geçmişini listele
+      operationId: listCreditTransactions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [EARNED, USED, EXPIRED, REFUNDED]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Kredi işlem listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditTransactionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================
+  # CATEGORIES - Kategoriler
+  # ============================================
+  /categories:
+    get:
+      tags:
+        - Categories
+      summary: Tüm kategorileri listele
+      operationId: listCategories
+      security: []
+      parameters:
+        - name: parentId
+          in: query
+          description: Üst kategori ID (boş ise ana kategoriler)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Kategori listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /categories/{categoryId}:
+    get:
+      tags:
+        - Categories
+      summary: Kategori detayı
+      operationId: getCategory
+      security: []
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Kategori detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================
+  # CATALOG - Yeni/Yenilenmiş Ürün Kataloğu
+  # ============================================
+  /catalog/products:
+    get:
+      tags:
+        - Catalog
+      summary: Katalog ürünlerini listele
+      description: Satışa sunulan yeni ve yenilenmiş ürünleri listeler
+      operationId: listCatalogProducts
+      security: []
+      parameters:
+        - name: categoryId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: brandId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: minPrice
+          in: query
+          schema:
+            type: number
+        - name: maxPrice
+          in: query
+          schema:
+            type: number
+        - name: condition
+          in: query
+          schema:
+            $ref: '#/components/schemas/CatalogProductCondition'
+        - name: search
+          in: query
+          description: Arama terimi
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [PRICE_ASC, PRICE_DESC, NEWEST, POPULAR]
+            default: NEWEST
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Ürün listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProductListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /catalog/products/{productId}:
+    get:
+      tags:
+        - Catalog
+      summary: Katalog ürün detayı
+      operationId: getCatalogProduct
+      security: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Ürün detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================
+  # TRADE-IN - Eski Ürün Değerleme ve Geri Alım
+  # ============================================
+  /trade-ins/brands:
+    get:
+      tags:
+        - TradeIn
+      summary: Trade-in desteklenen markaları listele
+      operationId: listTradeInBrands
+      security: []
+      parameters:
+        - name: categoryId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Marka listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Brand'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /trade-ins/models:
+    get:
+      tags:
+        - TradeIn
+      summary: Trade-in desteklenen modelleri listele
+      operationId: listTradeInModels
+      security: []
+      parameters:
+        - name: brandId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Model listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceModel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /trade-ins/valuations:
+    get:
+      tags:
+        - TradeIn
+      summary: Kullanıcının değerleme geçmişini listele
+      operationId: listValuations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ValuationStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Değerleme listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValuationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - TradeIn
+      summary: Yeni değerleme talebi oluştur
+      description: |
+        Kullanıcının eski cihazı için anlık değerleme teklifi al.
+        Bu işlem bir TradeInItem oluşturur ve değerleme yapar.
+      operationId: createValuation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateValuationRequest'
+      responses:
+        '201':
+          description: Değerleme oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Valuation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /trade-ins/valuations/{valuationId}:
+    get:
+      tags:
+        - TradeIn
+      summary: Değerleme detayını getir
+      operationId: getValuation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: valuationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Değerleme detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Valuation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /trade-ins/valuations/{valuationId}/accept:
+    post:
+      tags:
+        - TradeIn
+      summary: Değerleme teklifini kabul et ve gönderim başlat
+      description: |
+        Teklifi kabul eder ve TradeIn oluşturur.
+        Status: PENDING → QUOTED → ACCEPTED geçişi yapar.
+      operationId: acceptValuation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: valuationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptValuationRequest'
+      responses:
+        '200':
+          description: Teklif kabul edildi, gönderim oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeIn'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Değerleme zaten kullanılmış veya süresi dolmuş
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /trade-ins:
+    get:
+      tags:
+        - TradeIn
+      summary: Kullanıcının trade-in gönderimlerini listele
+      operationId: listTradeIns
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TradeInStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Trade-in gönderim listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeInListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /trade-ins/{tradeInId}:
+    get:
+      tags:
+        - TradeIn
+      summary: Trade-in gönderim detayı
+      operationId: getTradeIn
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tradeInId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trade-in detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeIn'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /trade-ins/{tradeInId}/respond-to-final-offer:
+    post:
+      tags:
+        - TradeIn
+      summary: Final teklife yanıt ver
+      description: |
+        Fiziksel inceleme sonrası final teklif yapıldığında kullanılır.
+        Kabul edilirse COMPLETED, reddedilirse RETURNED durumuna geçer.
+      operationId: respondToFinalOffer
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tradeInId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accept
+              properties:
+                accept:
+                  type: boolean
+                  description: true = kabul et, false = ürünü geri iste
+      responses:
+        '200':
+          description: Yanıt kaydedildi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeIn'
+        '400':
+          description: Gönderim FINAL_OFFERED durumunda değil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================
+  # ORDERS - Sipariş Yönetimi
+  # ============================================
+  /orders:
+    get:
+      tags:
+        - Orders
+      summary: Kullanıcının siparişlerini listele
+      operationId: listOrders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Sipariş listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - Orders
+      summary: Yeni sipariş oluştur
+      operationId: createOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Sipariş oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /orders/{orderId}:
+    get:
+      tags:
+        - Orders
+      summary: Sipariş detayı
+      operationId: getOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sipariş detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orders/{orderId}/cancel:
+    post:
+      tags:
+        - Orders
+      summary: Siparişi iptal et
+      operationId: cancelOrder
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: İptal nedeni
+      responses:
+        '200':
+          description: Sipariş iptal edildi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Sipariş iptal edilemez (SHIPPED veya sonrası)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================
+  # PAYMENTS - Ödeme İşlemleri
+  # ============================================
+  /payments/initialize:
+    post:
+      tags:
+        - Payments
+      summary: Ödeme başlat
+      description: iyzico/PayTR ile ödeme akışını başlatır
+      operationId: initializePayment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInitRequest'
+      responses:
+        '200':
+          description: Ödeme formu bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentInitResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /payments/callback:
+    post:
+      tags:
+        - Payments
+      summary: Ödeme callback (webhook)
+      description: iyzico/PayTR tarafından çağrılır
+      operationId: paymentCallback
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Callback alındı
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /payments/{paymentId}:
+    get:
+      tags:
+        - Payments
+      summary: Ödeme durumunu sorgula
+      operationId: getPaymentStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Ödeme durumu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/installment-options:
+    get:
+      tags:
+        - Payments
+      summary: Taksit seçeneklerini getir
+      operationId: getInstallmentOptions
+      security: []
+      parameters:
+        - name: amount
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: binNumber
+          in: query
+          description: Kart ilk 6 hanesi
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Taksit seçenekleri
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InstallmentOption'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================
+  # SHIPPING - Kargo İşlemleri
+  # ============================================
+  /shipping/providers:
+    get:
+      tags:
+        - Shipping
+      summary: Kargo firmalarını listele
+      operationId: listShippingProviders
+      security: []
+      responses:
+        '200':
+          description: Kargo firmaları
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShippingProvider'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /shipping/calculate:
+    post:
+      tags:
+        - Shipping
+      summary: Kargo ücretini hesapla
+      operationId: calculateShipping
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - addressId
+                - items
+              properties:
+                addressId:
+                  type: string
+                  format: uuid
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      productId:
+                        type: string
+                        format: uuid
+                      quantity:
+                        type: integer
+      responses:
+        '200':
+          description: Kargo seçenekleri ve ücretleri
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShippingOption'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /shipping/tracking/{trackingNumber}:
+    get:
+      tags:
+        - Shipping
+      summary: Kargo takibi
+      operationId: trackShipment
+      security: []
+      parameters:
+        - name: trackingNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Kargo takip bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShipmentTracking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /shipping/dropoff-locations:
+    get:
+      tags:
+        - Shipping
+      summary: Trade-in teslim noktalarını listele
+      operationId: listDropoffLocations
+      security: []
+      parameters:
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: lat
+          in: query
+          schema:
+            type: number
+        - name: lng
+          in: query
+          schema:
+            type: number
+        - name: radius
+          in: query
+          description: Kilometre cinsinden yarıçap
+          schema:
+            type: number
+            default: 10
+      responses:
+        '200':
+          description: Teslim noktaları
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DropoffLocation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================
+  # NOTIFICATIONS - Bildirimler
+  # ============================================
+  /notifications:
+    get:
+      tags:
+        - Notifications
+      summary: Bildirimleri listele
+      operationId: listNotifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Bildirim listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{notificationId}/read:
+    post:
+      tags:
+        - Notifications
+      summary: Bildirimi okundu olarak işaretle
+      operationId: markNotificationAsRead
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Bildirim okundu olarak işaretlendi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/read-all:
+    post:
+      tags:
+        - Notifications
+      summary: Tüm bildirimleri okundu olarak işaretle
+      operationId: markAllNotificationsAsRead
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tüm bildirimler okundu olarak işaretlendi
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================
+  # ADMIN - Internal Endpoints (NOT PUBLIC API)
+  # ============================================
+  /admin/risk-events:
+    post:
+      tags:
+        - Admin
+      summary: Risk olayı kaydet
+      description: |
+        **INTERNAL USE ONLY - NOT FOR PUBLIC API**
+
+        Fraud detection, güvenlik ihlali ve şüpheli aktivite kayıtları için kullanılır.
+        Bu endpoint sadece sistem servisleri ve admin paneli tarafından çağrılmalıdır.
+      operationId: createRiskEvent
+      x-internal: true
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RiskEventRequest'
+      responses:
+        '201':
+          description: Risk olayı kaydedildi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Bu endpoint'e erişim yetkiniz yok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/trade-ins/{tradeInId}/update-status:
+    post:
+      tags:
+        - Admin
+      summary: Trade-in durumunu güncelle
+      description: |
+        **INTERNAL USE ONLY - NOT FOR PUBLIC API**
+
+        İnceleme ekibi tarafından trade-in submission durumunu güncellemek için kullanılır.
+        State machine kurallarına uygun geçişler zorunludur.
+      operationId: adminUpdateTradeInStatus
+      x-internal: true
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tradeInId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - newStatus
+              properties:
+                newStatus:
+                  $ref: '#/components/schemas/TradeInStatus'
+                finalOffer:
+                  type: number
+                  description: FINAL_OFFERED durumuna geçerken zorunlu
+                rejectionReason:
+                  type: string
+                  description: REJECTED durumuna geçerken zorunlu
+                inspectionNotes:
+                  type: string
+                inspectionImages:
+                  type: array
+                  items:
+                    type: string
+                    format: uri
+      responses:
+        '200':
+          description: Durum güncellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradeIn'
+        '400':
+          description: Geçersiz durum geçişi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Bu endpoint'e erişim yetkiniz yok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/valuations/bulk-expire:
+    post:
+      tags:
+        - Admin
+      summary: Süresi dolan değerlemeleri toplu expire et
+      description: |
+        **INTERNAL USE ONLY - SCHEDULED JOB**
+
+        Cron job tarafından çağrılır. validUntil tarihi geçmiş QUOTED
+        durumundaki değerlemeleri EXPIRED olarak işaretler.
+      operationId: bulkExpireValuations
+      x-internal: true
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Expire edilen değerleme sayısı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expiredCount:
+                    type: integer
+                  processedAt:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Bu endpoint'e erişim yetkiniz yok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+# ============================================
+# COMPONENTS
+# ============================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Geçersiz istek
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Kimlik doğrulama gerekli
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Kaynak bulunamadı
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ============================================
+    # ENUMS - Standardized State Machines
+    # ============================================
+
+    # Valuation Status: Değerleme durumu
+    # PENDING → QUOTED → ACCEPTED/EXPIRED/REJECTED
+    #                  → USED (siparişte kullanıldı)
+    ValuationStatus:
+      type: string
+      enum:
+        - PENDING      # Değerleme hesaplanıyor
+        - QUOTED       # Teklif hazır, kullanıcı yanıtı bekleniyor
+        - ACCEPTED     # Kullanıcı teklifi kabul etti
+        - EXPIRED      # Teklif süresi doldu
+        - USED         # Değerleme bir siparişte kullanıldı
+        - REJECTED     # Kullanıcı teklifi reddetti
+
+    # Trade-In Status: Gönderim durumu
+    # CREATED → LABEL_CREATED → IN_TRANSIT → RECEIVED → INSPECTING
+    #        → FINAL_OFFERED → COMPLETED/RETURNED
+    #        → REJECTED (herhangi bir aşamada)
+    TradeInStatus:
+      type: string
+      enum:
+        - CREATED        # Gönderim oluşturuldu
+        - LABEL_CREATED  # Kargo etiketi oluşturuldu
+        - IN_TRANSIT     # Kargoda, yolda
+        - RECEIVED       # Teslim alındı, inceleme bekliyor
+        - INSPECTING     # İnceleme yapılıyor
+        - FINAL_OFFERED  # Final teklif yapıldı, kullanıcı yanıtı bekleniyor
+        - COMPLETED      # İşlem tamamlandı, kredi yüklendi
+        - REJECTED       # Ürün kabul edilmedi (BTK sorun, sahte vb.)
+        - RETURNED       # Kullanıcı final teklifi reddetti, ürün iade ediliyor
+
+    # Order Status: Sipariş durumu
+    OrderStatus:
+      type: string
+      enum:
+        - PENDING        # Sipariş oluşturuldu, ödeme bekleniyor
+        - PAID           # Ödeme alındı
+        - PROCESSING     # Hazırlanıyor
+        - SHIPPED        # Kargoya verildi
+        - DELIVERED      # Teslim edildi
+        - CANCELLED      # İptal edildi
+        - RETURN_REQUESTED  # İade talebi var
+        - RETURNED       # İade edildi
+
+    # Payment Status: Ödeme durumu
+    PaymentStatus:
+      type: string
+      enum:
+        - PENDING        # Ödeme bekleniyor
+        - PROCESSING     # İşleniyor
+        - COMPLETED      # Başarılı
+        - FAILED         # Başarısız
+        - REFUNDED       # İade edildi
+        - PARTIALLY_REFUNDED  # Kısmi iade
+
+    # Shipment Status: Kargo durumu
+    ShipmentStatus:
+      type: string
+      enum:
+        - PENDING        # Kargo bekleniyor
+        - PICKED_UP      # Teslim alındı
+        - IN_TRANSIT     # Yolda
+        - OUT_FOR_DELIVERY  # Dağıtımda
+        - DELIVERED      # Teslim edildi
+        - FAILED         # Teslimat başarısız
+
+    # Settlement Type: Ödeme şekli (MVP'de sınırlı)
+    SettlementType:
+      type: string
+      x-mvp-only: true
+      x-future-values:
+        - BANK_TRANSFER  # Faz 2 - KYC/AML sonrası
+      enum:
+        - CREDIT          # Platform kredisi olarak ekle
+        - ORDER_DISCOUNT  # Siparişten düş
+      description: |
+        **MVP Settlement Seçenekleri (Sadece bu değerler kabul edilir):**
+        - `CREDIT`: Trade-in değeri kullanıcı hesabına kredi olarak eklenir
+        - `ORDER_DISCOUNT`: Trade-in değeri mevcut/yeni siparişten düşülür
+
+        ⚠️ **BANK_TRANSFER MVP'de YOKTUR.**
+        Faz 2'de KYC/AML kontrolleri sonrası eklenecektir.
+        Server-side validation bu değeri reddeder.
+
+    # Catalog Product Condition
+    CatalogProductCondition:
+      type: string
+      enum:
+        - NEW            # Sıfır ürün
+        - REFURBISHED    # Yenilenmiş
+        - LIKE_NEW       # Sıfır gibi
+      description: Satıştaki ürünün durumu
+
+    # Trade-In Item Condition (kullanıcının eski ürünü)
+    TradeInItemCondition:
+      type: string
+      enum:
+        - EXCELLENT      # Mükemmel durumda
+        - GOOD           # İyi durumda
+        - FAIR           # Orta durumda
+        - POOR           # Kötü durumda
+      description: Kullanıcının trade-in için gönderdiği ürünün durumu
+
+    # ============================================
+    # AUTH SCHEMAS
+    # ============================================
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - firstName
+        - lastName
+        - phone
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+          pattern: '^(\+90|0)?[0-9]{10}$'
+        acceptTerms:
+          type: boolean
+          default: true
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+          description: Token geçerlilik süresi (saniye)
+        user:
+          $ref: '#/components/schemas/User'
+
+    # ============================================
+    # USER SCHEMAS
+    # ============================================
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        avatar:
+          type: string
+          format: uri
+        emailVerified:
+          type: boolean
+        phoneVerified:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        avatar:
+          type: string
+          format: uri
+
+    UserCredits:
+      type: object
+      properties:
+        availableBalance:
+          type: number
+          description: Kullanılabilir trade-in kredisi (TL)
+        pendingBalance:
+          type: number
+          description: Bekleyen kredi (inceleme aşamasında)
+        totalEarned:
+          type: number
+          description: Toplam kazanılan kredi
+        totalUsed:
+          type: number
+          description: Toplam kullanılan kredi
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditTransaction'
+
+    CreditTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [EARNED, USED, EXPIRED, REFUNDED]
+        amount:
+          type: number
+        description:
+          type: string
+        relatedTradeInId:
+          type: string
+          format: uuid
+        relatedOrderId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    CreditTransactionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CreditTransaction'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ============================================
+    # ADDRESS SCHEMAS
+    # ============================================
+    Address:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Ev
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        addressLine1:
+          type: string
+        addressLine2:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        postalCode:
+          type: string
+        country:
+          type: string
+          default: TR
+        isDefault:
+          type: boolean
+
+    AddressRequest:
+      type: object
+      required:
+        - title
+        - firstName
+        - lastName
+        - phone
+        - addressLine1
+        - city
+        - district
+      properties:
+        title:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        addressLine1:
+          type: string
+        addressLine2:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        postalCode:
+          type: string
+        isDefault:
+          type: boolean
+          default: false
+
+    # ============================================
+    # CATEGORY SCHEMAS
+    # ============================================
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        image:
+          type: string
+          format: uri
+        parentId:
+          type: string
+          format: uuid
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+        tradeInSupported:
+          type: boolean
+          description: Bu kategoride trade-in destekleniyor mu
+
+    # ============================================
+    # BRAND & MODEL SCHEMAS
+    # ============================================
+    Brand:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        logo:
+          type: string
+          format: uri
+        categoryIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    DeviceModel:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        brandId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        releaseYear:
+          type: integer
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceVariant'
+
+    DeviceVariant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        storage:
+          type: string
+          example: "128GB"
+        color:
+          type: string
+        baseTradeInValue:
+          type: number
+          description: EXCELLENT durumda tahmini trade-in değeri (TL)
+
+    # ============================================
+    # CATALOG PRODUCT SCHEMAS (Satıştaki Ürünler)
+    # ============================================
+    CatalogProduct:
+      type: object
+      description: Satışa sunulan yeni veya yenilenmiş ürün
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          description: Stok kodu
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        brandId:
+          type: string
+          format: uuid
+        brandName:
+          type: string
+        modelId:
+          type: string
+          format: uuid
+        modelName:
+          type: string
+        categoryId:
+          type: string
+          format: uuid
+        category:
+          $ref: '#/components/schemas/Category'
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+        price:
+          type: number
+          description: Satış fiyatı (TL)
+        originalPrice:
+          type: number
+          description: Liste fiyatı (TL)
+        discountPercentage:
+          type: number
+          description: İndirim yüzdesi
+        condition:
+          $ref: '#/components/schemas/CatalogProductCondition'
+        stock:
+          type: integer
+          minimum: 0
+        specifications:
+          type: object
+          additionalProperties:
+            type: string
+        warranty:
+          type: object
+          properties:
+            months:
+              type: integer
+            description:
+              type: string
+        tradeInEligible:
+          type: boolean
+          description: Bu ürün trade-in ile alınabilir mi
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CatalogProductListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogProduct'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ============================================
+    # TRADE-IN ITEM SCHEMAS (Kullanıcının Eski Ürünü)
+    # ============================================
+    TradeInItem:
+      type: object
+      description: Kullanıcının trade-in için gönderdiği eski cihaz
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        brandId:
+          type: string
+          format: uuid
+        brandName:
+          type: string
+        modelId:
+          type: string
+          format: uuid
+        modelName:
+          type: string
+        variantId:
+          type: string
+          format: uuid
+        variantDetails:
+          type: string
+          example: "128GB, Siyah"
+        declaredCondition:
+          $ref: '#/components/schemas/TradeInItemCondition'
+        actualCondition:
+          $ref: '#/components/schemas/TradeInItemCondition'
+          description: Fiziksel inceleme sonrası belirlenen durum
+        conditionDetails:
+          $ref: '#/components/schemas/ConditionDetails'
+        imei:
+          type: string
+          description: IMEI numarası (telefon için)
+        serialNumber:
+          type: string
+          description: Seri numarası
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Kullanıcının yüklediği fotoğraflar
+        inspectionImages:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: İnceleme sırasında çekilen fotoğraflar
+        inspectionNotes:
+          type: string
+          description: İnceleme notları
+        createdAt:
+          type: string
+          format: date-time
+
+    ConditionDetails:
+      type: object
+      properties:
+        screenCondition:
+          type: string
+          enum: [PERFECT, MINOR_SCRATCHES, CRACKED]
+        bodyCondition:
+          type: string
+          enum: [PERFECT, MINOR_SCRATCHES, DENTS, MAJOR_DAMAGE]
+        batteryHealth:
+          type: integer
+          minimum: 0
+          maximum: 100
+        functionalIssues:
+          type: array
+          items:
+            type: string
+            enum: [TOUCHSCREEN, BUTTONS, CAMERA, SPEAKER, MICROPHONE, WIFI, BLUETOOTH, CHARGING, FACE_ID, TOUCH_ID]
+        accessories:
+          type: array
+          items:
+            type: string
+            enum: [BOX, CHARGER, CABLE, EARPHONES, MANUAL]
+
+    # ============================================
+    # VALUATION SCHEMAS
+    # ============================================
+    CreateValuationRequest:
+      type: object
+      required:
+        - modelId
+        - condition
+      properties:
+        modelId:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+          description: Belirli varyant (storage, renk)
+        condition:
+          $ref: '#/components/schemas/TradeInItemCondition'
+        conditionDetails:
+          $ref: '#/components/schemas/ConditionDetails'
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Ürün fotoğrafları (opsiyonel ama değeri artırır)
+        imei:
+          type: string
+          description: IMEI numarası (telefon için)
+
+    Valuation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        tradeInItem:
+          $ref: '#/components/schemas/TradeInItem'
+        status:
+          $ref: '#/components/schemas/ValuationStatus'
+        estimatedValue:
+          type: number
+          description: Tahmini trade-in değeri (TL)
+        minimumValue:
+          type: number
+          description: En düşük olası değer (TL)
+        maximumValue:
+          type: number
+          description: En yüksek olası değer (TL)
+        validUntil:
+          type: string
+          format: date-time
+          description: Teklif geçerlilik süresi
+        createdAt:
+          type: string
+          format: date-time
+
+    ValuationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Valuation'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    AcceptValuationRequest:
+      type: object
+      required:
+        - shippingMethod
+        - settlementType
+      properties:
+        shippingMethod:
+          type: string
+          enum: [COURIER, DROPOFF, PICKUP]
+          description: |
+            - COURIER: Kargo ile gönder (ücretsiz kargo etiketi)
+            - DROPOFF: Teslim noktasına bırak
+            - PICKUP: Evden toplama (MVP'de seçili şehirlerde)
+        pickupAddressId:
+          type: string
+          format: uuid
+          description: PICKUP veya COURIER için adres ID
+        dropoffLocationId:
+          type: string
+          format: uuid
+          description: DROPOFF için teslim noktası ID
+        settlementType:
+          $ref: '#/components/schemas/SettlementType'
+        applyToOrderId:
+          type: string
+          format: uuid
+          description: ORDER_DISCOUNT seçildiyse uygulanacak sipariş ID
+
+    # ============================================
+    # TRADE-IN SCHEMAS
+    # ============================================
+    TradeIn:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        valuationId:
+          type: string
+          format: uuid
+        valuation:
+          $ref: '#/components/schemas/Valuation'
+        tradeInItem:
+          $ref: '#/components/schemas/TradeInItem'
+        status:
+          $ref: '#/components/schemas/TradeInStatus'
+        shippingMethod:
+          type: string
+          enum: [COURIER, DROPOFF, PICKUP]
+        trackingNumber:
+          type: string
+        shippingLabel:
+          type: string
+          format: uri
+          description: Kargo etiketi PDF
+        initialOffer:
+          type: number
+          description: İlk teklif (TL)
+        finalOffer:
+          type: number
+          description: Fiziksel inceleme sonrası final teklif (TL)
+        offerDifference:
+          type: number
+          description: İlk ve final teklif arasındaki fark
+        settlementType:
+          $ref: '#/components/schemas/SettlementType'
+        settlementStatus:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+        appliedToOrderId:
+          type: string
+          format: uuid
+          description: ORDER_DISCOUNT ise uygulanan sipariş
+        creditTransactionId:
+          type: string
+          format: uuid
+          description: CREDIT ise oluşturulan kredi işlemi
+        timeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TimelineEvent:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        note:
+          type: string
+        actor:
+          type: string
+          enum: [SYSTEM, USER, ADMIN]
+
+    TradeInListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TradeIn'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ============================================
+    # ORDER SCHEMAS
+    # ============================================
+    CreateOrderRequest:
+      type: object
+      required:
+        - items
+        - shippingAddressId
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - productId
+              - quantity
+            properties:
+              productId:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+                minimum: 1
+        shippingAddressId:
+          type: string
+          format: uuid
+        billingAddressId:
+          type: string
+          format: uuid
+        shippingProviderId:
+          type: string
+          format: uuid
+        useTradeInCredit:
+          type: boolean
+          default: false
+          description: Mevcut trade-in kredisini kullan
+        tradeInId:
+          type: string
+          format: uuid
+          description: Bekleyen trade-in'i bu siparişe uygula (ORDER_DISCOUNT)
+        couponCode:
+          type: string
+        notes:
+          type: string
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderNumber:
+          type: string
+          example: "ORD-2025-000123"
+        userId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        shippingAddress:
+          $ref: '#/components/schemas/Address'
+        billingAddress:
+          $ref: '#/components/schemas/Address'
+        subtotal:
+          type: number
+        shippingCost:
+          type: number
+        couponDiscount:
+          type: number
+        tradeInDiscount:
+          type: number
+          description: Trade-in'den uygulanan indirim
+        creditUsed:
+          type: number
+          description: Kullanılan trade-in kredisi
+        tax:
+          type: number
+        total:
+          type: number
+          description: Ödenecek toplam tutar
+        payment:
+          $ref: '#/components/schemas/Payment'
+        shipping:
+          type: object
+          properties:
+            provider:
+              type: string
+            trackingNumber:
+              type: string
+            estimatedDelivery:
+              type: string
+              format: date
+        appliedTradeInId:
+          type: string
+          format: uuid
+        notes:
+          type: string
+        timeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        productImage:
+          type: string
+          format: uri
+        productCondition:
+          $ref: '#/components/schemas/CatalogProductCondition'
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        totalPrice:
+          type: number
+
+    OrderListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ============================================
+    # PAYMENT SCHEMAS
+    # ============================================
+    PaymentInitRequest:
+      type: object
+      required:
+        - orderId
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        installments:
+          type: integer
+          minimum: 1
+          default: 1
+        saveCard:
+          type: boolean
+          default: false
+
+    PaymentInitResponse:
+      type: object
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [IYZICO, PAYTR]
+        checkoutFormContent:
+          type: string
+          description: iyzico checkout form HTML
+        iframeUrl:
+          type: string
+          format: uri
+          description: PayTR iframe URL
+        token:
+          type: string
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        currency:
+          type: string
+          default: TRY
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        provider:
+          type: string
+          enum: [IYZICO, PAYTR]
+        providerPaymentId:
+          type: string
+        installments:
+          type: integer
+        paidAt:
+          type: string
+          format: date-time
+        refundedAt:
+          type: string
+          format: date-time
+
+    InstallmentOption:
+      type: object
+      properties:
+        installmentCount:
+          type: integer
+        installmentPrice:
+          type: number
+        totalPrice:
+          type: number
+        interestRate:
+          type: number
+        bankName:
+          type: string
+        cardType:
+          type: string
+
+    # ============================================
+    # SHIPPING SCHEMAS
+    # ============================================
+    ShippingProvider:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Yurtiçi Kargo
+        logo:
+          type: string
+          format: uri
+        estimatedDays:
+          type: string
+          example: "1-3"
+        trackingUrlTemplate:
+          type: string
+          format: uri
+          description: "{trackingNumber}" 
+
+    ShippingOption:
+      type: object
+      properties:
+        providerId:
+          type: string
+          format: uuid
+        providerName:
+          type: string
+        price:
+          type: number
+        estimatedDelivery:
+          type: string
+          format: date
+        isFree:
+          type: boolean
+
+    ShipmentTracking:
+      type: object
+      properties:
+        trackingNumber:
+          type: string
+        provider:
+          type: string
+        status:
+          $ref: '#/components/schemas/ShipmentStatus'
+        estimatedDelivery:
+          type: string
+          format: date
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              location:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+              description:
+                type: string
+
+    DropoffLocation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        phone:
+          type: string
+        workingHours:
+          type: string
+          example: "09:00-18:00"
+        distance:
+          type: number
+          description: Kullanıcıya uzaklık (km)
+
+    # ============================================
+    # NOTIFICATION SCHEMAS
+    # ============================================
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ORDER_UPDATE, TRADE_IN_UPDATE, PAYMENT, CREDIT, PROMOTION, SYSTEM]
+        title:
+          type: string
+        message:
+          type: string
+        data:
+          type: object
+          description: İlgili kaynak bilgisi (orderId, submissionId, vb.)
+        isRead:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        unreadCount:
+          type: integer
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # ============================================
+    # COMMON SCHEMAS
+    # ============================================
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalItems:
+          type: integer
+        totalPages:
+          type: integer
+        hasNext:
+          type: boolean
+        hasPrev:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    # ============================================
+    # ADMIN SCHEMAS (Internal Use Only)
+    # ============================================
+    RiskEventType:
+      type: string
+      enum:
+        - FRAUD_SUSPECTED           # Şüpheli fraud aktivitesi
+        - IMEI_BLACKLISTED          # BTK kara listesinde IMEI
+        - DUPLICATE_DEVICE          # Aynı cihaz birden fazla kez gönderilmiş
+        - CONDITION_MISMATCH        # Beyan edilen durum ile gerçek uyuşmuyor
+        - STOLEN_DEVICE             # Çalıntı cihaz şüphesi
+        - IDENTITY_MISMATCH         # Kimlik uyuşmazlığı
+        - SUSPICIOUS_PATTERN        # Şüpheli davranış paterni
+        - PAYMENT_FRAUD             # Ödeme dolandırıcılığı
+        - ACCOUNT_TAKEOVER          # Hesap ele geçirme girişimi
+      description: |
+        Risk olayı tipleri. Bu enum sadece admin/sistem tarafından kullanılır.
+
+    RiskEventSeverity:
+      type: string
+      enum:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+
+    RiskEventRequest:
+      type: object
+      x-internal: true
+      required:
+        - type
+        - severity
+        - entityType
+        - entityId
+      properties:
+        type:
+          $ref: '#/components/schemas/RiskEventType'
+        severity:
+          $ref: '#/components/schemas/RiskEventSeverity'
+        entityType:
+          type: string
+          enum: [USER, TRADE_IN_SUBMISSION, ORDER, PAYMENT, VALUATION]
+        entityId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Ek bilgiler (IP, user agent, vb.)
+        autoAction:
+          type: string
+          enum: [NONE, BLOCK_USER, REJECT_SUBMISSION, CANCEL_ORDER, FLAG_FOR_REVIEW]
+          default: FLAG_FOR_REVIEW
+
+    RiskEvent:
+      type: object
+      x-internal: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/RiskEventType'
+        severity:
+          $ref: '#/components/schemas/RiskEventSeverity'
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        metadata:
+          type: object
+        actionTaken:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+        resolvedBy:
+          type: string
+          format: uuid
+        resolution:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          description: Kaydı oluşturan sistem veya admin
