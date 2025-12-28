@@ -124,13 +124,14 @@ export class TradeInService {
     // Create trade-in
     const tradeIn = await this.prisma.tradeIn.create({
       data: {
+        userId,
         valuationId,
         tradeInItemId: valuation.tradeInItemId,
         status: 'CREATED',
         shippingMethod: data.shippingMethod,
         initialOffer: valuation.estimatedValue,
         settlementType: data.settlementType,
-        applyToOrderId: data.applyToOrderId,
+        appliedToOrderId: data.applyToOrderId,
       },
       include: {
         valuation: true,

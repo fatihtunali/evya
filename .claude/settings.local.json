@@ -7,7 +7,9 @@
       "Bash(findstr:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nFix TypeScript build errors in API\n\n- Update tsconfig.json with skipLibCheck and strictPropertyInitialization\n- Add definite assignment assertions to DTO properties\n- Fix JWT module options type\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(ssh root@142.93.136.228 \"cd /var/www/evya && git pull && pnpm build\")",
+      "Bash(git commit:*)"
     ]
   }
 }
