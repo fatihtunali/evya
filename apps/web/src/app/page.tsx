@@ -24,7 +24,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-brand-50 via-white to-brand-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
+      <section className="relative overflow-hidden bg-gradient-to-br from-purple-50 via-white to-cyan-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
         <div className="absolute inset-0 bg-grid-pattern opacity-5" />
         <div className="container relative py-20 md:py-32">
           <motion.div
@@ -34,9 +34,9 @@ export default function HomePage() {
             className="mx-auto max-w-4xl text-center"
           >
             <motion.div variants={fadeInUp} className="mb-6">
-              <span className="inline-flex items-center gap-2 rounded-full bg-brand-100 px-4 py-2 text-sm font-medium text-brand-700 dark:bg-brand-900/30 dark:text-brand-400">
+              <span className="inline-flex items-center gap-2 rounded-full bg-purple-100 px-4 py-2 text-sm font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
                 <Star className="h-4 w-4" />
-                Turkiye'nin 1 Numaralı Trade-in Platformu
+                Türkiye'nin 1 Numaralı Takas Platformu
               </span>
             </motion.div>
 
@@ -45,7 +45,9 @@ export default function HomePage() {
               className="mb-6 text-4xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-5xl md:text-6xl"
             >
               Eskisini Ver,{' '}
-              <span className="gradient-text">Yenisini Al</span>
+              <span className="bg-gradient-to-r from-purple-600 to-cyan-500 bg-clip-text text-transparent">
+                Yenisini Al
+              </span>
             </motion.h1>
 
             <motion.p
@@ -60,8 +62,8 @@ export default function HomePage() {
               variants={fadeInUp}
               className="flex flex-col items-center justify-center gap-4 sm:flex-row"
             >
-              <Button asChild size="lg" className="h-14 px-8 text-lg">
-                <Link href="/trade-in">
+              <Button asChild size="lg" className="h-14 px-8 text-lg bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-700 hover:to-cyan-600">
+                <Link href="/takas">
                   Cihazımı Değerlendir
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Link>
@@ -78,12 +80,12 @@ export default function HomePage() {
             >
               {[
                 { label: 'Mutlu Müşteri', value: '50K+' },
-                { label: 'Trade-in İşlemi', value: '100K+' },
+                { label: 'Takas İşlemi', value: '100K+' },
                 { label: 'Ortalama Tasarruf', value: '%40' },
                 { label: 'Değerleme Süresi', value: '2 dk' },
               ].map((stat) => (
                 <div key={stat.label} className="text-center">
-                  <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 md:text-4xl">
+                  <div className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-cyan-500 bg-clip-text text-transparent md:text-4xl">
                     {stat.value}
                   </div>
                   <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">
@@ -96,8 +98,8 @@ export default function HomePage() {
         </div>
 
         {/* Decorative elements */}
-        <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-brand-200/50 blur-3xl dark:bg-brand-900/30" />
-        <div className="absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-brand-200/50 blur-3xl dark:bg-brand-900/30" />
+        <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-purple-200/50 blur-3xl dark:bg-purple-900/30" />
+        <div className="absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-cyan-200/50 blur-3xl dark:bg-cyan-900/30" />
       </section>
 
       {/* How It Works */}
@@ -141,10 +143,10 @@ export default function HomePage() {
                 viewport={{ once: true }}
                 className="group relative rounded-2xl border bg-white p-8 shadow-sm transition-all hover:shadow-lg dark:border-gray-800 dark:bg-gray-900"
               >
-                <div className="absolute -right-2 -top-2 flex h-12 w-12 items-center justify-center rounded-full bg-brand-100 text-lg font-bold text-brand-700 dark:bg-brand-900/50 dark:text-brand-400">
+                <div className="absolute -right-2 -top-2 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 text-lg font-bold text-white">
                   {item.step}
                 </div>
-                <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-xl bg-brand-100 text-brand-600 dark:bg-brand-900/50 dark:text-brand-400">
+                <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-xl bg-purple-100 text-purple-600 dark:bg-purple-900/50 dark:text-purple-400">
                   <item.icon className="h-7 w-7" />
                 </div>
                 <h3 className="mb-3 text-xl font-semibold text-gray-900 dark:text-white">
@@ -181,7 +183,7 @@ export default function HomePage() {
               {
                 icon: CreditCard,
                 title: 'En İyi Fiyat',
-                description: 'Piyasanın en rekabetçi trade-in fiyatları.',
+                description: 'Piyasanın en rekabetçi takas fiyatları.',
               },
               {
                 icon: Truck,
@@ -197,7 +199,7 @@ export default function HomePage() {
                 viewport={{ once: true }}
                 className="rounded-xl border bg-white p-6 dark:border-gray-800 dark:bg-gray-900"
               >
-                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-lg bg-brand-100 text-brand-600 dark:bg-brand-900/50 dark:text-brand-400">
+                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-r from-purple-100 to-cyan-100 text-purple-600 dark:from-purple-900/50 dark:to-cyan-900/50 dark:text-purple-400">
                   <feature.icon className="h-6 w-6" />
                 </div>
                 <h3 className="mb-2 font-semibold text-gray-900 dark:text-white">
@@ -215,7 +217,7 @@ export default function HomePage() {
       {/* CTA Section */}
       <section className="py-20 md:py-32">
         <div className="container">
-          <div className="relative overflow-hidden rounded-3xl gradient-bg p-12 text-center text-white md:p-20">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 to-cyan-500 p-12 text-center text-white md:p-20">
             <div className="relative z-10">
               <h2 className="mb-4 text-3xl font-bold md:text-4xl">
                 Hemen Başlayın
@@ -225,7 +227,7 @@ export default function HomePage() {
                 İlk değerleme tamamen ücretsiz!
               </p>
               <Button asChild size="lg" variant="secondary" className="h-14 px-8 text-lg">
-                <Link href="/trade-in">
+                <Link href="/takas">
                   Ücretsiz Değerleme Al
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Link>

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Facebook, Twitter, Instagram, Youtube, Mail, Phone, MapPin } from 'lucide-react';
 
 const footerLinks = {
@@ -21,7 +22,7 @@ const footerLinks = {
     { name: 'Çerez Politikası', href: '/cookies' },
   ],
   services: [
-    { name: 'Trade-in', href: '/trade-in' },
+    { name: 'Takas', href: '/takas' },
     { name: 'Ürün Kataloğu', href: '/catalog' },
     { name: 'Kurumsal', href: '/corporate' },
     { name: 'Bayilik', href: '/franchise' },
@@ -42,17 +43,17 @@ export function Footer() {
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-6">
           {/* Brand */}
           <div className="lg:col-span-2">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-white font-bold">
-                EV
-              </div>
-              <span className="font-bold text-xl">
-                <span className="text-brand-600">Eskisini Ver</span>
-                <span className="text-gray-600 dark:text-gray-400"> Yenisini Al</span>
-              </span>
+            <Link href="/" className="flex items-center">
+              <Image
+                src="/images/logo-transparent.png"
+                alt="Eskisini Ver Yenisini Al"
+                width={200}
+                height={50}
+                className="h-12 w-auto"
+              />
             </Link>
             <p className="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-xs">
-              Türkiye'nin lider trade-in platformu. Eski cihazlarınızı değerlendirin,
+              Türkiye'nin lider takas platformu. Eski cihazlarınızı değerlendirin,
               yeni ürünlerle takas edin.
             </p>
 

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const navigation = [
-  { name: 'Trade-in', href: '/trade-in' },
+  { name: 'Takas', href: '/takas' },
   { name: 'Ürünler', href: '/catalog' },
   { name: 'Nasıl Çalışır', href: '/how-it-works' },
   { name: 'Hakkımızda', href: '/about' },
@@ -23,15 +23,15 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md">
       <nav className="container flex h-16 items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
-          {/* Logo placeholder - will be replaced with actual logo */}
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-white font-bold">
-            EV
-          </div>
-          <span className="hidden font-bold text-xl sm:block">
-            <span className="text-brand-600">Eskisini Ver</span>
-            <span className="text-gray-600 dark:text-gray-400"> Yenisini Al</span>
-          </span>
+        <Link href="/" className="flex items-center">
+          <Image
+            src="/images/logo-transparent.png"
+            alt="Eskisini Ver Yenisini Al"
+            width={200}
+            height={50}
+            className="h-10 w-auto"
+            priority
+          />
         </Link>
 
         {/* Desktop Navigation */}
@@ -85,7 +85,7 @@ export function Header() {
 
           {/* CTA Button */}
           <Button asChild className="hidden md:flex">
-            <Link href="/trade-in">Cihazımı Değerlendir</Link>
+            <Link href="/takas">Takas Başlat</Link>
           </Button>
 
           {/* Mobile menu button */}
@@ -126,7 +126,7 @@ export function Header() {
           ))}
           <div className="flex gap-4 pt-4 border-t">
             <Button asChild className="flex-1">
-              <Link href="/trade-in">Cihazımı Değerlendir</Link>
+              <Link href="/takas">Takas Başlat</Link>
             </Button>
             <Button asChild variant="outline" className="flex-1">
               <Link href="/login">Giriş Yap</Link>
